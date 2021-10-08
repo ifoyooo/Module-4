@@ -167,7 +167,7 @@ def tensor_conv2d(
     out_shape,
     out_strides,
     out_size,
-    input,
+    input_storage,
     input_shape,
     input_strides,
     weight,
@@ -221,7 +221,30 @@ def tensor_conv2d(
     s2 = weight_strides
 
     # TODO: Implement for Task 4.2.
-    raise NotImplementedError('Need to implement for Task 4.2')
+    for i in prange(out_size):
+        ordinal_i=i+0
+        out_index=out_shape.copy()
+        to_index(ordinal_i,out_shape,out_index)
+        out_batch,out_channel,out_h,out_w=out_index
+        result=0
+        for j in prange(in_channels):
+            ordinal_j=j+0
+            for h in prange(kh):
+                ordinal_h=h+0
+                for w in range(kw):
+                    ordinal_w=w+0
+                    weight_index=np.array([out_channel,ordinal_j,ordinal_h,ordinal_w])
+                    if not reverse:
+                        if out_h+ordinal_h<height and  out_w+ordinal_w<width:
+                            in_index=np.array([out_batch,ordinal_j,out_h+ordinal_h,out_w+ordinal_w])
+                            result+=(input_storage[index_to_position(in_index,input_strides)]*weight[index_to_position(weight_index,weight_strides)])
+                    else:
+                        if out_h-ordinal_h>=0 and out_w-ordinal_w>=0:
+                            in_index=np.array([out_batch,ordinal_j,out_h-ordinal_h,out_w-ordinal_w])
+                            result+=(input_storage[index_to_position(in_index,input_strides)]*weight[index_to_position(weight_index,weight_strides)])
+        out[index_to_position(out_index,out_strides)]=result
+
+    # raise NotImplementedError('Need to implement for Task 4.2')
 
 
 class Conv2dFun(Function):
