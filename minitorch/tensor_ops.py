@@ -1,6 +1,6 @@
 import numpy as np
 from .tensor_data import (
-    count,
+    to_index,
     index_to_position,
     broadcast_index,
     shape_broadcast,
@@ -10,10 +10,20 @@ from .tensor_data import (
 
 def tensor_map(fn):
     """
-    Higher-order tensor map function ::
+    Low-level implementation of tensor map between
+    tensors with *possibly different strides*.
 
-      fn_map = tensor_map(fn)
-      fn_map(out, ... )
+    Simple version:
+
+    * Fill in the `out` array by applying `fn` to each
+      value of `in_storage` assuming `out_shape` and `in_shape`
+      are the same size.
+
+    Broadcasted version:
+
+    * Fill in the `out` array by applying `fn` to each
+      value of `in_storage` assuming `out_shape` and `in_shape`
+      broadcast. (`in_shape` must be smaller than `out_shape`).
 
     Args:
         fn: function from float-to-float to apply
@@ -29,18 +39,39 @@ def tensor_map(fn):
     """
 
     def _map(out, out_shape, out_strides, in_storage, in_shape, in_strides):
-        raise NotImplementedError('Need to include this file from past assignment.')
+        # TODO: Implement for Task 2.2.
+        out_index=np.array(out_shape)#等价于copy
+        in_index=np.array(in_shape)
+        for i in range(len(out)):
+            to_index(i,out_shape,out_index) # 获得在某个continous下的out_index
+            broadcast_index(out_index,out_shape,in_shape,in_index) #转化到某个continous下的in_index
+            out[index_to_position(out_index,out_strides)]=fn(in_storage[index_to_position(in_index,in_strides)])#找到对应的strides下的position.
+
+
+        # raise NotImplementedError('Need to implement for Task 2.2')
 
     return _map
 
-
+#high order function 输入函数，输出函数。
 def map(fn):
     """
     Higher-order tensor map function ::
 
       fn_map = map(fn)
-      b = fn_map(a)
+      fn_map(a, out)
+      out
 
+    Simple version::
+
+        for i:
+            for j:
+                out[i, j] = fn(a[i, j])
+
+    Broadcasted version (`a` might be smaller than `out`) ::
+
+        for i:
+            for j:
+                out[i, j] = fn(a[i, 0])
 
     Args:
         fn: function from float-to-float to apply.
@@ -49,7 +80,7 @@ def map(fn):
                should broadcast with `a`
 
     Returns:
-        :class:`Tensor` : new tensor
+        :class:`TensorData` : new tensor data
     """
 
     f = tensor_map(fn)
@@ -60,16 +91,25 @@ def map(fn):
         f(*out.tuple(), *a.tuple())
         return out
 
-    return ret
+    return ret 
 
 
 def tensor_zip(fn):
     """
-    Higher-order tensor zipWith (or map2) function. ::
+    Low-level implementation of tensor zip between
+    tensors with *possibly different strides*.
 
-      fn_zip = tensor_zip(fn)
-      fn_zip(out, ...)
+    Simple version:
 
+    * Fill in the `out` array by applying `fn` to each
+      value of `a_storage` and `b_storage` assuming `out_shape`
+      and `a_shape` are the same size.
+
+    Broadcasted version:
+
+    * Fill in the `out` array by applying `fn` to each
+      value of `a_storage` and `b_storage` assuming `a_shape`
+      and `b_shape` broadcast to `out_shape`.
 
     Args:
         fn: function mapping two floats to float to apply
@@ -98,7 +138,19 @@ def tensor_zip(fn):
         b_shape,
         b_strides,
     ):
-        raise NotImplementedError('Need to include this file from past assignment.')
+        # TODO: Implement for Task 2.2.
+        out_index=np.array(out_shape)
+        a_index=np.array(a_shape)
+        b_index=np.array(b_shape)
+        for i in range(len(out)):
+            to_index(i,out_shape,out_index)
+            broadcast_index(out_index,out_shape,a_shape,a_index)
+            broadcast_index(out_index,out_shape,b_shape,b_index)
+            out[index_to_position(out_index,out_strides)]=fn(
+                a_storage[index_to_position(a_index,a_strides)],
+                b_storage[index_to_position(b_index,b_strides)]
+                )
+        # raise NotImplementedError('Need to implement for Task 2.2')
 
     return _zip
 
@@ -108,7 +160,20 @@ def zip(fn):
     Higher-order tensor zip function ::
 
       fn_zip = zip(fn)
-      c = fn_zip(a, b)
+      out = fn_zip(a, b)
+
+    Simple version ::
+
+        for i:
+            for j:
+                out[i, j] = fn(a[i, j], b[i, j])
+
+    Broadcasted version (`a` and `b` might be smaller than `out`) ::
+
+        for i:
+            for j:
+                out[i, j] = fn(a[i, 0], b[0, j])
+
 
     Args:
         fn: function from two floats-to-float to apply
@@ -116,7 +181,7 @@ def zip(fn):
         b (:class:`TensorData`): tensor to zip over
 
     Returns:
-        :class:`Tensor` : new tensor
+        :class:`TensorData` : new tensor 
     """
 
     f = tensor_zip(fn)
@@ -136,10 +201,8 @@ def zip(fn):
 def tensor_reduce(fn):
     """
     Higher-order tensor reduce function. ::
-
       fn_reduce = tensor_reduce(fn)
       c = fn_reduce(out, ...)
-
     Args:
         fn: reduction function mapping two floats to float
         out (array): storage for `out` tensor
@@ -150,7 +213,6 @@ def tensor_reduce(fn):
         a_strides (array): strides for `a` tensor
         reduce_shape (array): shape of reduction (1 for dimension kept, shape value for dimensions summed out)
         reduce_size (int): size of reduce shape
-
     Returns:
         None : Fills in `out`
     """
@@ -165,7 +227,17 @@ def tensor_reduce(fn):
         reduce_shape,
         reduce_size,
     ):
-        raise NotImplementedError('Need to include this file from past assignment.')
+        # TODO: Implement for Task 2.2.
+        index = np.array(out_shape)
+        offset = np.array(reduce_shape)
+        for p in range(len(out)):
+            to_index(p, out_shape, index)
+            k = index_to_position(index, out_strides)
+            for s in range(reduce_size):
+                to_index(s, reduce_shape, offset)
+                a_index = index + offset
+                out[k] = fn(
+                    out[k], a_storage[index_to_position(a_index, a_strides)])
 
     return _reduce
 
@@ -173,20 +245,15 @@ def tensor_reduce(fn):
 def reduce(fn, start=0.0):
     """
     Higher-order tensor reduce function. ::
-
       fn_reduce = reduce(fn)
       reduced = fn_reduce(a, dims)
-
-
     Args:
         fn: function from two floats-to-float to apply
         a (:class:`TensorData`): tensor to reduce over
         dims (list, optional): list of dims to reduce
         out (:class:`TensorData`, optional): tensor to reduce into
-
-
     Returns:
-        :class:`Tensor` : new tensor
+        :class:`TensorData` : new tensor data
     """
 
     f = tensor_reduce(fn)
@@ -194,6 +261,8 @@ def reduce(fn, start=0.0):
     # START Code Update
     def ret(a, dims=None, out=None):
         old_shape = None
+        if isinstance(dims,int):
+            dims=[dims]
         if out is None:
             out_shape = list(a.shape)
             for d in dims:
@@ -220,7 +289,7 @@ def reduce(fn, start=0.0):
                 reduce_shape.append(1)
 
         # Apply
-        f(*out.tuple(), *a.tuple(), reduce_shape, reduce_size)
+        f(*out.tuple(), *a.tuple(), np.array(reduce_shape), reduce_size)# change by wfy
 
         if old_shape is not None:
             out = out.view(*old_shape)
@@ -230,6 +299,7 @@ def reduce(fn, start=0.0):
     # END Code Update
 
 
+# 相当于类属函数
 class TensorOps:
     map = map
     zip = zip

@@ -1,32 +1,43 @@
-## Task 0.4
-## Modules
-
-
 class Module:
     """
+    Modules form a tree that store parameters and other
+    submodules. They make up the basis of neural network stacks.
+
     Attributes:
         _modules (dict of name x :class:`Module`): Storage of the child modules
         _parameters (dict of name x :class:`Parameter`): Storage of the module's parameters
-        mode (string): Mode of operation, can be {"train", "eval"}.
+        training (bool): Whether the module is in training mode or evaluation mode
 
     """
 
     def __init__(self):
         self._modules = {}
         self._parameters = {}
-        self.mode = "train"
+        self.training = True
 
     def modules(self):
-        "Return the child modules of this module."
+        "Return the direct child modules of this module."
         return self.__dict__["_modules"].values()
 
     def train(self):
         "Set the mode of this module and all descendent modules to `train`."
-        raise NotImplementedError('Need to include this file from past assignment.')
+        # TODO: Implement for Task 0.4.
+        def train_recursion(module):
+            module.training=True
+            for submodule in module.modules():
+                train_recursion(submodule)
+        train_recursion(self)
+        # raise NotImplementedError('Need to implement for Task 0.4')
 
     def eval(self):
         "Set the mode of this module and all descendent modules to `eval`."
-        raise NotImplementedError('Need to include this file from past assignment.')
+        # TODO: Implement for Task 0.4.
+        def eval_recursion(module):
+            module.training=False
+            for submodule in module.modules():
+                eval_recursion(submodule)
+        eval_recursion(self)
+        # raise NotImplementedError('Need to implement for Task 0.4')
 
     def named_parameters(self):
         """
@@ -34,12 +45,28 @@ class Module:
 
 
         Returns:
-            dict: Each name (key) and :class:`Parameter` (value) under this module.
+            list of pairs: Contains the name and :class:`Parameter` of each ancestor parameter.
         """
-        raise NotImplementedError('Need to include this file from past assignment.')
+        # TODO: Implement for Task 0.4.
+
+        ans=[]
+        def named_parameters_recursion(module,prefix):
+            tmp=prefix + '.' if prefix else ''
+            for name,value in module.__dict__["_parameters"].items():
+                ans.append((tmp+name,value))
+            for name,submodule in module.__dict__["_modules"].items():
+                prefix=tmp+name
+                named_parameters_recursion(submodule,prefix)
+        named_parameters_recursion(self,'')
+        return ans
+        # raise NotImplementedError('Need to implement for Task 0.4')
 
     def parameters(self):
-        return self.named_parameters().values()
+        "Enumerate over all the parameters of this module and its descendents."
+        # TODO: Implement for Task 0.4.
+
+        return list(map(lambda x: x[1],self.named_parameters()))
+        # raise NotImplementedError('Need to implement for Task 0.4')
 
     def add_parameter(self, k, v):
         """
@@ -52,11 +79,11 @@ class Module:
         Returns:
             Parameter: Newly created parameter.
         """
-        val = Parameter(v)
+        val = Parameter(v, k)
         self.__dict__["_parameters"][k] = val
         return val
 
-    def __setattr__(self, key, val):
+    def __setattr__(self, key, val):#每次类的实例进行属性赋值都会调用该函数。
         if isinstance(val, Parameter):
             self.__dict__["_parameters"][key] = val
         elif isinstance(val, Module):
@@ -64,14 +91,12 @@ class Module:
         else:
             super().__setattr__(key, val)
 
-    def __getattr__(self, key):
+    def __getattr__(self, key):#当使用某个不存在的属性时，如module.a,a不是其中的属性就会将a作为参数执行该函数。
         if key in self.__dict__["_parameters"]:
             return self.__dict__["_parameters"][key]
 
         if key in self.__dict__["_modules"]:
             return self.__dict__["_modules"][key]
-
-        return self.__getattribute__(key)
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
@@ -79,7 +104,7 @@ class Module:
     def forward(self):
         assert False, "Not Implemented"
 
-    def __repr__(self):
+    def __repr__(self):#用于自定义对象的输出信息
         def _addindent(s_, numSpaces):
             s = s_.split("\n")
             if len(s) == 1:
@@ -115,16 +140,24 @@ class Parameter:
     any value for testing.
     """
 
-    def __init__(self, x=None):
+    def __init__(self, x=None, name=None):
         self.value = x
+        self.name = name
         if hasattr(x, "requires_grad_"):
             self.value.requires_grad_(True)
+            if self.name:
+                self.value.name = self.name
 
     def update(self, x):
         "Update the parameter value."
         self.value = x
         if hasattr(x, "requires_grad_"):
             self.value.requires_grad_(True)
+            if self.name:
+                self.value.name = self.name
 
     def __repr__(self):
         return repr(self.value)
+
+    def __str__(self):
+        return str(self.value)

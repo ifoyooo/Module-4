@@ -1,65 +1,97 @@
-import uuid
-
-
-def wrap_tuple(x):
-    if isinstance(x, tuple):
-        return x
-    return (x,)
-
-
-def unwrap_tuple(x):
-    if len(x) == 1:
-        return x[0]
-    return x
+variable_count = 1
 
 
 class Variable:
     """
     Attributes:
-        history (:class:`History`) : the Function calls that created this variable or None if constant
-        derivative (number): the derivative with respect to this variable
+        history (:class:`History` or None) : the Function calls that created this variable or None if constant
+        derivative (variable type): the derivative with respect to this variable
+        grad (variable type) : alias for derivative (PyTorch name)
         name (string) : an optional name for debugging
     """
 
     def __init__(self, history, name=None):
+        global variable_count
         assert history is None or isinstance(history, History), history
 
         self.history = history
         self._derivative = None
 
+        # This is a bit simplistic, but make things easier.
+        variable_count += 1
+        self.unique_id = "Variable" + str(variable_count)
+
         # For debugging can have a name.
         if name is not None:
             self.name = name
         else:
-            self.name = str(uuid.uuid4())
+            self.name = self.unique_id
+
+        self.used = 0
 
     def requires_grad_(self, val):
-        self.history = History(None, None, None)
+        """
+        Set the requires_grad flag to `val` on variable.
+
+        Ensures that operations on this variable will trigger
+        backpropagation.
+
+        Args:
+            val (bool): whether to require grad
+        """
+        self.history = History()
 
     def backward(self, d_output=None):
         """
         Calls autodiff to fill in the derivatives for the history of this object.
+
+        Args:
+            d_output (number, opt): starting derivative to backpropagate through the model
+                                   (typically left out, and assumed to be 1.0).
         """
         if d_output is None:
             d_output = 1.0
-        backpropagate(VariableWithDeriv(self, d_output))
+        backpropagate(self, d_output)
 
     @property
     def derivative(self):
         return self._derivative
 
-    ## IGNORE
-    def __hash__(self):
-        return hash(self.name)
+    def is_leaf(self):
+        "True if this variable created by the user (no `last_fn`)"
+        return self.history.last_fn is None
 
-    def _add_deriv(self, val):
-        assert self.history.is_leaf(), "Only leaf variables can have derivatives."
-        if self._derivative is None:
+    ## IGNORE
+    def accumulate_derivative(self, val):
+        """
+        Add `val` to the the derivative accumulated on this variable.
+        Should only be called during autodifferentiation on leaf variables.
+
+        Args:
+            val (number): value to be accumulated
+        """
+        assert self.is_leaf(), "Only leaf variables can have derivatives."
+        if self._derivative is None: #(如果是None的话，就清零)
             self._derivative = self.zeros()
         self._derivative += val
 
-    def zero_grad_(self):
+    def zero_derivative_(self):  # pragma: no cover
+        """
+        Reset the derivative on this variable.
+        """
         self._derivative = self.zeros()
+
+    def zero_grad_(self):  # pragma: no cover
+        """
+        Reset the derivative on this variable.
+        """
+        self.zero_derivative_()
+
+    def expand(self, x):
+        "Placeholder for tensor variables"
+        return x
+
+    # Helper functions for children classes.
 
     def __radd__(self, b):
         return self + b
@@ -70,15 +102,30 @@ class Variable:
     def zeros(self):
         return 0.0
 
-    def expand(self, x):
-        return x
 
-    ## IGNORE
+def wrap_tuple(x):
+    "Turn a possible value into a tuple"
+    if isinstance(x, tuple):
+        return x
+    return (x,)
+
+
+def unwrap_tuple(x):
+    "Turn a singleton tuple into a value"
+    if len(x) == 1:
+        return x[0]
+    return x
 
 
 class Context:
     """
-    Context class is used by.
+    Context class is used by `Function` to store information during the forward pass.
+
+    Attributes:
+        no_grad (bool) : do not save gradient information
+        saved_values (tuple) : tuple of values saved for backward pass
+        saved_tensors (tuple) : alias for saved_values (PyTorch name)
+
     """
 
     def __init__(self, no_grad=False):
@@ -86,6 +133,12 @@ class Context:
         self.no_grad = no_grad
 
     def save_for_backward(self, *values):
+        """
+        Store the given `values` if they need to be used during backpropagation.
+
+        Args:
+            values (list of values) : values to save for backward
+        """
         if self.no_grad:
             return
         self._saved_values = values
@@ -96,16 +149,21 @@ class Context:
         assert self._saved_values is not None, "Did you forget to save values?"
         return unwrap_tuple(self._saved_values)
 
+    @property
+    def saved_tensors(self):  # pragma: no cover
+        return self.saved_values
+
 
 class History:
     """
-    `History` stores all of the `Function` operations that were used to
-    construct an autodiff object.
+    `History` stores the history of `Function` operations that was
+    used to construct the current Variable.
 
     Attributes:
-        last_fn (:class:`FunctionBase`) : The last function that was called.
-        ctx (:class:`Context`): The context for that function.
+        last_fn (:class:`FunctionBase`) : The last Function that was called.
+        ctx (:class:`Context`): The context for that Function.
         inputs (list of inputs) : The inputs that were given when `last_fn.forward` was called.
+
     """
 
     def __init__(self, last_fn=None, ctx=None, inputs=None):
@@ -113,19 +171,17 @@ class History:
         self.ctx = ctx
         self.inputs = inputs
 
-    def is_leaf(self):
-        return self.last_fn is None
-
     def backprop_step(self, d_output):
+        """
+        Run one step of backpropagation by calling chain rule.
+
+        Args:
+            d_output : a derivative with respect to this variable
+
+        Returns:
+            list of numbers : a derivative with respect to `inputs`
+        """
         return self.last_fn.chain_rule(self.ctx, self.inputs, d_output)
-
-
-class VariableWithDeriv:
-    "Holder for a variable with it derivative."
-
-    def __init__(self, variable, deriv):
-        self.variable = variable
-        self.deriv = variable.expand(deriv)
 
 
 class FunctionBase:
@@ -141,7 +197,7 @@ class FunctionBase:
     def variable(raw, history):
         raise NotImplementedError()
 
-    @classmethod
+    @classmethod #注意此处为classmethod，不需要实例化，相当于把一组函数封装到一个类当中。
     def apply(cls, *vals):
         raw_vals = []
         need_grad = False
@@ -149,6 +205,7 @@ class FunctionBase:
             if isinstance(v, Variable):
                 if v.history is not None:
                     need_grad = True
+                v.used += 1
                 raw_vals.append(v.get_data())
             else:
                 raw_vals.append(v)
@@ -160,8 +217,8 @@ class FunctionBase:
         )
         back = None
         if need_grad:
-            back = History(cls, ctx, vals)
-        return cls.variable(cls.data(c), back)
+            back = History(cls, ctx, vals)#运算符、保留值和值
+        return cls.variable(cls.data(c), back)#新建varable。
 
     @classmethod
     def chain_rule(cls, ctx, inputs, d_output):
@@ -174,22 +231,45 @@ class FunctionBase:
             d_output (number) : The `d_output` value in the chain rule.
 
         Returns:
-            list of :class:`VariableWithDeriv`: A list of non-constant variables with their derivatives
+            list of (`Variable`, number) A list of non-constant variables with their derivatives
             (see `is_constant` to remove unneeded variables)
 
         """
-        raise NotImplementedError('Need to include this file from past assignment.')
-
-
-def is_leaf(val):
-    return isinstance(val, Variable) and val.history.is_leaf()
+        # TODO: Implement for Task 1.3.
+        # raise NotImplementedError('Need to implement for Task 1.3')
+        ans=[]
+        grad_list=wrap_tuple(cls.backward(ctx,d_output))
+        for index in range(len(inputs)):
+            if not is_constant(inputs[index]):
+                ans.append((inputs[index],grad_list[index]))
+        return ans
+        #存疑
 
 
 def is_constant(val):
     return not isinstance(val, Variable) or val.history is None
 
 
-def backpropagate(final_variable_with_deriv):
+def topological_sort(variable): # DFS实现Topological Sort
+    "Returns nodes in topological order"
+    order = []
+    seen = set()
+
+    def visit(var):
+        if var.unique_id in seen:
+            return
+        if not var.is_leaf():
+            for m in var.history.inputs:
+                if not is_constant(m):
+                    visit(m)
+        seen.add(var.unique_id)
+        order.insert(0, var)
+
+    visit(variable)
+    return order
+
+
+def backpropagate(variable, deriv):
     """
     Runs a breadth-first search on the computation graph in order to
     backpropagate derivatives to the leaves.
@@ -197,9 +277,20 @@ def backpropagate(final_variable_with_deriv):
     See :doc:`backpropagate` for details on the algorithm.
 
     Args:
-        final_variable_with_deriv (:class:`VariableWithDeriv`): The final variable
-                and its derivative that we want to propagate backward to the leaves.
+        variable (:class:`Variable`): The final variable
+        deriv (number) : Its derivative that we want to propagate backward to the leaves.
 
     No return. Should write to its results to the derivative values of each leaf.
     """
-    raise NotImplementedError('Need to include this file from past assignment.')
+    # TODO: Implement for Task 1.4.
+    variable_queue=topological_sort(variable=variable)
+    v_d_dict=dict(zip(list(map(lambda x:x.name,variable_queue)),[0 for i in range(len(variable_queue))]))
+    v_d_dict[variable.name]=deriv
+    for variable in variable_queue:
+        if variable.is_leaf():#遍历到叶子节点之前由于拓扑排序，其梯度积累已经完成。
+            variable.accumulate_derivative(v_d_dict[variable.name])
+        else:
+            for father_variable,father_deriv in variable.history.backprop_step(v_d_dict[variable.name]):
+                v_d_dict[father_variable.name]+=father_deriv
+
+    # raise NotImplementedError('Need to implement for Task 1.4')

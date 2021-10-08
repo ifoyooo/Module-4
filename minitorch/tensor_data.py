@@ -1,4 +1,6 @@
 import random
+
+from numpy.core.fromnumeric import sort
 from .operators import prod
 from numpy import array, float64, ndarray
 import numba
@@ -23,19 +25,24 @@ def index_to_position(index, strides):
     Returns:
         int : position in storage
     """
+    # return sum([i*s for i,s in zip(index,strides)]) #rewrite to suit no python
+    ans=0
+    for i,s in zip(index,strides):
+        ans+=(i*s)
+    return ans
+    # TODO: Implement for Task 2.1.
+    # raise NotImplementedError('Need to implement for Task 2.1')
 
-    raise NotImplementedError('Need to include this file from past assignment.')
 
-
-def count(position, shape, out_index):
+def to_index(ordinal, shape, out_index):
     """
-    Convert a `position` to an index in the `shape`.
+    Convert an `ordinal` to an index in the `shape`.
     Should ensure that enumerating position 0 ... size of a
     tensor produces every index exactly once. It
     may not be the inverse of `index_to_position`.
 
     Args:
-        position (int): current position.
+        ordinal (int): ordinal position to convert.
         shape (tuple): tensor shape.
         out_index (array): the index corresponding to position.
 
@@ -43,7 +50,20 @@ def count(position, shape, out_index):
       None : Fills in `out_index`.
 
     """
-    raise NotImplementedError('Need to include this file from past assignment.')
+    # TODO: Implement for Task 2.1.
+    '''
+    TODO:REWRITE to suit jit version, since in jit version to_index, 
+         strides_fom_shape should be a jit version
+    strides=strides_from_shape(shape)
+    for i in range(len(strides)-1):
+        out_index[i]=ordinal//strides[i]
+        ordinal-=out_index[i]*strides[i]
+    out_index[-1]=ordinal%shape[-1]
+    '''
+    for i in range(len(shape)-1,-1,-1):
+        out_index[i]=ordinal%shape[i]
+        ordinal//=shape[i]
+    # raise NotImplementedError('Need to implement for Task 2.1')
 
 
 def broadcast_index(big_index, big_shape, shape, out_index):
@@ -63,7 +83,13 @@ def broadcast_index(big_index, big_shape, shape, out_index):
     Returns:
         None : Fills in `out_index`.
     """
-    raise NotImplementedError('Need to include this file from past assignment.')
+    # TODO: Implement for Task 2.2.
+    # shape can become bigshape through broadcasting.
+    for i in range(len(shape)):
+        offset=i+len(big_shape)-len(shape)
+        out_index[i]=big_index[offset] if shape[i]!=1 else 0
+
+    # raise NotImplementedError('Need to implement for Task 2.2')
 
 
 def shape_broadcast(shape1, shape2):
@@ -80,7 +106,24 @@ def shape_broadcast(shape1, shape2):
     Raises:
         IndexingError : if cannot broadcast
     """
-    raise NotImplementedError('Need to include this file from past assignment.')
+    # TODO: Implement for Task 2.2.
+    shortshape,longshape=sorted([list(shape1),list(shape2)],key=len)
+    llen,slen=len(longshape),len(shortshape)
+    shortshape=[1 for i in range(llen-slen)]+shortshape
+
+    ans=[]
+    for  i in range(llen):
+        s_value,l_value=shortshape[i],longshape[i]
+        if s_value==1:
+            ans.append(l_value)
+        elif l_value==1:
+            ans.append(s_value)
+        elif s_value==l_value:
+            ans.append(l_value)
+        else:
+            raise IndexingError("can't broadcasting")
+    return tuple(ans)
+    # raise NotImplementedError('Need to implement for Task 2.2')
 
 
 def strides_from_shape(shape):
@@ -101,6 +144,7 @@ class TensorData:
 
         if strides is None:
             strides = strides_from_shape(shape)
+            # assert 0, f"strides{strides}"
 
         assert isinstance(strides, tuple), "Strides must be tuple"
         assert isinstance(shape, tuple), "Shape must be tuple"
@@ -112,9 +156,9 @@ class TensorData:
         self.dims = len(strides)
         self.size = int(prod(shape))
         self.shape = shape
-        assert len(self._storage) == self.size
+        assert len(self._storage) == self.size,f" len of storage:{len(self._storage)},size:{self.size}"
 
-    def to_cuda_(self):
+    def to_cuda_(self):  # pragma: no cover
         if not numba.cuda.is_cuda_array(self._storage):
             self._storage = numba.cuda.to_device(self._storage)
 
@@ -153,13 +197,13 @@ class TensorData:
 
         # Call fast indexing.
         return index_to_position(array(index), self._strides)
-
+    #TODO:READ
     def indices(self):
         lshape = array(self.shape)
         out_index = array(self.shape)
         for i in range(self.size):
-            count(i, lshape, out_index)
-            yield tuple(out_index)
+            to_index(i, lshape, out_index)
+            yield tuple(out_index)        
 
     def sample(self):
         return tuple((random.randint(0, s - 1) for s in self.shape))
@@ -171,7 +215,7 @@ class TensorData:
         self._storage[self.index(key)] = val
 
     def tuple(self):
-        return (self._storage, self._shape, self._strides)
+        return (self._storage, self._shape, self._strides) #返回tensor的各项信息。
 
     def permute(self, *order):
         """
@@ -186,10 +230,14 @@ class TensorData:
         assert list(sorted(order)) == list(
             range(len(self.shape))
         ), f"Must give a position to each dimension. Shape: {self.shape} Order: {order}"
+        
+        #permute并没有改变storge，但是改变了strides，太妙了。
+        #reshape也不改变storge，但是不改变strides。
+        return TensorData(self._storage,tuple([self.shape[i] for i in order]),tuple([self.strides[i] for i in order]))
+        # TODO: Implement for Task 2.1.
+        # raise NotImplementedError('Need to implement for Task 2.1')
 
-        raise NotImplementedError('Need to include this file from past assignment.')
-
-    def to_string(self):
+    def to_string(self): #尝试修改
         s = ""
         for index in self.indices():
             l = ""

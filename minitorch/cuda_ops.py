@@ -1,20 +1,20 @@
 from numba import cuda
 import numba
+
 from .tensor_data import (
-    count,
+    to_index,
     index_to_position,
     broadcast_index,
     shape_broadcast,
     MAX_DIMS,
 )
-import numpy
 import numpy as np
 
 # This code will CUDA compile fast versions your tensor_data functions.
 # If you get an error, read the docs for NUMBA as to what is allowed
 # in these functions.
 
-count = cuda.jit(device=True)(count)
+to_index = cuda.jit(device=True)(to_index)
 index_to_position = cuda.jit(device=True)(index_to_position)
 broadcast_index = cuda.jit(device=True)(broadcast_index)
 
@@ -41,7 +41,18 @@ def tensor_map(fn):
     """
 
     def _map(out, out_shape, out_strides, out_size, in_storage, in_shape, in_strides):
-        raise NotImplementedError('Need to include this file from past assignment.')
+        # TODO: Implement for Task 3.3.
+        assert len(out) == out_size
+        i = cuda.blockDim.x*cuda.blockIdx.x+cuda.threadIdx.x
+        if i >= out_size:
+            return
+        out_index = cuda.local.array(MAX_DIMS, numba.int32)
+        in_index = cuda.local.array(MAX_DIMS, numba.int32)
+        to_index(i, out_shape, out_index)
+        broadcast_index(out_index, out_shape, in_shape, in_index)
+        out[index_to_position(out_index, out_strides)] = fn(
+            in_storage[index_to_position(in_index, in_strides)])
+        # raise NotImplementedError('Need to implement for Task 3.3')
 
     return cuda.jit()(_map)
 
@@ -99,7 +110,20 @@ def tensor_zip(fn):
         b_shape,
         b_strides,
     ):
-        raise NotImplementedError('Need to include this file from past assignment.')
+        # TODO: Implement for Task 3.3.
+        assert len(out) == out_size
+        i = cuda.blockDim.x*cuda.blockIdx.x+cuda.threadIdx.x
+        if i >= out_size:
+            return
+        out_index = cuda.local.array(MAX_DIMS, numba.int32)
+        a_index = cuda.local.array(MAX_DIMS, numba.int32)
+        b_index = cuda.local.array(MAX_DIMS, numba.int32)
+        to_index(i, out_shape, out_index)
+        broadcast_index(out_index, out_shape, a_shape, a_index)
+        broadcast_index(out_index, out_shape, b_shape, b_index)
+        out[index_to_position(out_index, out_strides)] = fn(a_storage[index_to_position(
+            a_index, a_strides)], b_storage[index_to_position(b_index, b_strides)])
+        # raise NotImplementedError('Need to implement for Task 3.3')
 
     return cuda.jit()(_zip)
 
@@ -151,7 +175,25 @@ def tensor_reduce(fn):
         reduce_shape,
         reduce_size,
     ):
-        raise NotImplementedError('Need to include this file from past assignment.')
+        # TODO: Implement for Task 3.3.
+        # raise NotImplementedError('Need to implement for Task 3.3')
+        assert len(out) == out_size
+        i = cuda.blockDim.x*cuda.blockIdx.x+cuda.threadIdx.x
+        if i >= out_size:
+            return
+        out_index = cuda.local.array(MAX_DIMS, numba.int32)
+        reduce_index = cuda.local.array(MAX_DIMS, numba.int32)
+        a_index = cuda.local.array(MAX_DIMS, numba.int32)  # 注意临时变量都需要这个包起来
+        pos = cuda.local.array(2, numba.int32)
+        to_index(i, out_shape, out_index)
+        pos[0] = index_to_position(out_index, out_strides)
+        for j in range(reduce_size):
+            to_index(j, reduce_shape, reduce_index)
+            # a_index=reduce_index+out_index #直接赋值会重新定义
+            for k in range(len(out_shape)):
+                a_index[k] = reduce_index[k]+out_index[k]
+            pos[1] = index_to_position(a_index, a_strides)
+            out[pos[0]] = fn(out[pos[0]], a_storage[pos[1]])
 
     return cuda.jit()(_reduce)
 
@@ -160,6 +202,8 @@ def reduce(fn, start=0.0):
     f = tensor_reduce(cuda.jit(device=True)(fn))
 
     def ret(a, dims=None, out=None):
+        if isinstance(dims, int):
+            dims = [dims]
         old_shape = None
         if out is None:
             out_shape = list(a.shape)
@@ -236,7 +280,23 @@ def tensor_matrix_multiply(
         None : Fills in `out`
     """
 
-    raise NotImplementedError('Need to include this file from past assignment.')
+    # TODO: Implement for Task 3.4.
+    i=cuda.blockDim.x*cuda.blockIdx.x+cuda.threadIdx.x
+    if i>=out_size:
+        return 
+    out_index=cuda.local.array(MAX_DIMS,numba.int32)
+    a_index=cuda.local.array(MAX_DIMS,numba.int32)
+    b_index=cuda.local.array(MAX_DIMS,numba.int32)
+    to_index(i, out_shape, out_index)
+    broadcast_index(out_index,out_shape, a_shape, a_index)
+    broadcast_index(out_index,out_shape,b_shape,b_index)
+    for j in range(a_shape[-1]):
+        a_index[len(a_shape)-1]=j #注意这里不能像fast_ops用-1，-2因为index现在为长为32的array。
+        b_index[len(b_shape)-2]=j
+        out[index_to_position(out_index, out_strides)] += (a_storage[index_to_position(a_index, a_strides)]
+                         * b_storage[index_to_position(b_index, b_strides)])
+
+    # raise NotImplementedError('Need to implement for Task 3.4')
 
 
 def matrix_multiply(a, b):
