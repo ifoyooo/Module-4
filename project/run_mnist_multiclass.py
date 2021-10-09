@@ -1,7 +1,9 @@
 from mnist import MNIST
+from numba.core.types.iterators import RangeIteratorType
 import minitorch
 import visdom
 import numpy
+from tqdm import tqdm
 
 # vis = visdom.Visdom()
 mndata = MNIST("data/")
@@ -10,8 +12,8 @@ images, labels = mndata.load_training()
 
 BACKEND = minitorch.make_tensor_backend(minitorch.FastOps)
 
-BATCH = 16
-N = 3000
+BATCH = 100
+N = 100
 
 # Number of classes (10 digits)
 C = 10
@@ -107,21 +109,21 @@ def make_mnist(start, stop):
 
 
 X, ys = make_mnist(0, N)
-val_x, val_ys = make_mnist(10000, 10100)
+val_x, val_ys = make_mnist(10000, 10500)
 # vis.images(numpy.array(val_x).reshape((len(val_ys), 1, H, W))[:16], win="val_images")
 
 
 model = Network()
 
 losses = []
-for epoch in range(250):
+for epoch in tqdm(range(250)):
     total_loss = 0.0
     cur = 0
     cur_y = 0
 
     model.train()
-    for batch_num, example_num in enumerate(range(0, N, BATCH)):
-        if N - example_num <= BATCH:
+    for batch_num, example_num in tqdm(enumerate(range(0, N, BATCH))):
+        if N - example_num < BATCH:
             continue
         y = minitorch.tensor_fromlist(
             ys[example_num : example_num + BATCH], backend=BACKEND
@@ -145,39 +147,56 @@ for epoch in range(250):
             if p.value.grad is not None:
                 p.update(p.value - RATE * (p.value.grad / float(BATCH)))
 
-        if batch_num % 50 == 0:
-            model.eval()
+    if (epoch+1)%5 == 0:
+        model.eval()
             # Evaluate on 5 held-out batches
 
-            correct = 0
-            for val_example_num in range(0, 5 * BATCH, BATCH):
-                y = minitorch.tensor_fromlist(
-                    val_ys[val_example_num : val_example_num + BATCH], backend=BACKEND
-                )
-                x = minitorch.tensor_fromlist(
-                    val_x[val_example_num : val_example_num + BATCH], backend=BACKEND
-                )
-                out = model.forward(x.view(BATCH, 1, H, W)).view(BATCH, C)
-                for i in range(BATCH):
-                    m = -1000
-                    ind = -1
-                    for j in range(C):
-                        if out[i, j] > m:
-                            ind = j
-                            m = out[i, j]
-                    if y[i, ind] == 1.0:
-                        correct += 1
+        train_correct = 0
+        x=minitorch.tensor_fromlist(X,backend=BACKEND).view(N,1,H,W)
+        y=minitorch.tensor_fromlist(ys,backend=BACKEND)
+        out=model.forward(x).view(N,C)
+        for i in range(N):
+            m = -1000
+            ind = -1
+            for j in range(C):
+                if out[i, j] > m:
+                    ind = j
+                    m = out[i, j]
+            if y[i, ind] == 1.0:
+                train_correct += 1            
 
-            print(
+
+        eval_correct = 0
+        y = minitorch.tensor_fromlist(
+        val_ys[0:30], backend=BACKEND
+        )
+        x = minitorch.tensor_fromlist(
+        val_x[0:30], backend=BACKEND
+        )
+        out = model.forward(x.view(30, 1, H, W)).view(30, C)
+        for i in range(30):
+            m = -1000
+            ind = -1
+            for j in range(C):
+                if out[i, j] > m:
+                    ind = j
+                    m = out[i, j]
+            if y[i, ind] == 1.0:
+                eval_correct += 1
+
+        print(
                 "Epoch ",
                 epoch,
                 " example ",
                 example_num,
                 " loss ",
                 total_loss[0],
-                " accuracy ",
-                correct / float(5 * BATCH),
-            )
+                "eval_accuracy ",
+                eval_correct / float(30),
+                "train_accuracy ",
+                train_correct/float(N)
+
+        )
 
             # Visualize test batch
             # hidden_x_1=model.mid(minitorch.tensor_fromlist(val_x[0:16], backend=BACKEND).view(16,1,H,W))
@@ -195,5 +214,5 @@ for epoch in range(250):
             #         opts=dict(nrow=4, caption=f"out_images_channel_{channel}"),
             #     )
 
-            total_loss = 0.0
-            model.train()
+        total_loss = 0.0
+        model.train()
