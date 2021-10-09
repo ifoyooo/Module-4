@@ -3,7 +3,7 @@ import minitorch
 import visdom
 import numpy
 
-vis = visdom.Visdom()
+# vis = visdom.Visdom()
 mndata = MNIST("data/")
 images, labels = mndata.load_training()
 
@@ -11,7 +11,7 @@ images, labels = mndata.load_training()
 BACKEND = minitorch.make_tensor_backend(minitorch.FastOps)
 
 BATCH = 16
-N = 5000
+N = 3000
 
 # Number of classes (10 digits)
 C = 10
@@ -35,7 +35,8 @@ class Linear(minitorch.Module):
 
     def forward(self, x):
         # TODO: Implement for Task 4.5.
-        raise NotImplementedError('Need to implement for Task 4.5')
+        return x@self.weights.value+self.bias.value
+        # raise NotImplementedError('Need to implement for Task 4.5')
 
 
 class Conv2d(minitorch.Module):
@@ -46,7 +47,8 @@ class Conv2d(minitorch.Module):
 
     def forward(self, input):
         # TODO: Implement for Task 4.5.
-        raise NotImplementedError('Need to implement for Task 4.5')
+        return minitorch.fast_conv.conv2d(input,self.weights.value)+self.bias.value
+        # raise NotImplementedError('Need to implement for Task 4.5')
 
 
 class Network(minitorch.Module):
@@ -68,15 +70,28 @@ class Network(minitorch.Module):
         super().__init__()
 
         # For vis
-        self.mid = None
-        self.out = None
+        self.mid = Conv2d(1,4,3,3)
+        self.out = Conv2d(4,8,3,3)
+        self.l1=Linear(392,64)
+        self.l2=Linear(64,C)
 
         # TODO: Implement for Task 4.4.
-        raise NotImplementedError('Need to implement for Task 4.4')
+        # raise NotImplementedError('Need to implement for Task 4.4')
 
     def forward(self, x):
         # TODO: Implement for Task 4.4.
-        raise NotImplementedError('Need to implement for Task 4.4')
+        x=self.mid(x).relu()
+        x=self.out(x).relu()
+        x=minitorch.nn.maxpool2d(x,[4,4])
+        x=x.view(x.size//392,392)
+        x=self.l1(x).relu()
+        if self.training:
+            x=minitorch.nn.dropout(x,0.25)*4/3
+        x=self.l2(x)
+        x=minitorch.nn.logsoftmax(x,1)
+        return x
+
+        # raise NotImplementedError('Need to implement for Task 4.4')
 
 
 def make_mnist(start, stop):
@@ -92,8 +107,8 @@ def make_mnist(start, stop):
 
 
 X, ys = make_mnist(0, N)
-val_x, val_ys = make_mnist(10000, 10500)
-vis.images(numpy.array(val_x).reshape((len(val_ys), 1, H, W))[:BATCH], win="val_images")
+val_x, val_ys = make_mnist(10000, 10100)
+# vis.images(numpy.array(val_x).reshape((len(val_ys), 1, H, W))[:16], win="val_images")
 
 
 model = Network()
@@ -114,8 +129,8 @@ for epoch in range(250):
         x = minitorch.tensor_fromlist(
             X[example_num : example_num + BATCH], backend=BACKEND
         )
-        x.requires_grad_(True)
-        y.requires_grad_(True)
+        # x.requires_grad_(True)
+        # y.requires_grad_(True)
 
         # Forward
         out = model.forward(x.view(BATCH, 1, H, W)).view(BATCH, C)
@@ -165,18 +180,20 @@ for epoch in range(250):
             )
 
             # Visualize test batch
-            for channel in range(4):
-                vis.images(
-                    -1 * model.mid.to_numpy()[:, channel : channel + 1],
-                    win=f"mid_images_{channel}",
-                    opts=dict(nrow=4, caption=f"mid_images_{channel}"),
-                )
-            for channel in range(8):
-                vis.images(
-                    -1 * model.out.to_numpy()[:, channel : channel + 1],
-                    win=f"out_images_{channel}",
-                    opts=dict(nrow=4, caption=f"out_images_{channel}"),
-                )
+            # hidden_x_1=model.mid(minitorch.tensor_fromlist(val_x[0:16], backend=BACKEND).view(16,1,H,W))
+            # for channel in range(4):
+            #     vis.images(
+            #         -1 * hidden_x_1.to_numpy()[:, channel : channel + 1],
+            #         win=f"mid_images_{channel}",
+            #         opts=dict(nrow=4, caption=f"mid_images_channel_{channel}"),
+            #     )
+            # hidden_x_2=model.out(hidden_x_1.relu())
+            # for channel in range(8):
+            #     vis.images(
+            #         -1 * hidden_x_2.to_numpy()[:, channel : channel + 1],
+            #         win=f"out_images_{channel}",
+            #         opts=dict(nrow=4, caption=f"out_images_channel_{channel}"),
+            #     )
 
             total_loss = 0.0
             model.train()
